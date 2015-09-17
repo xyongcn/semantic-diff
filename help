@@ -1,0 +1,245 @@
+# 语法差异分析软件帮助文档 #
+
+本软件的主要目标是对 Linux 内核的不同版本进行语法差异分析（本课题研究是对Linux-3.5.4和Linux-3.8.13这两个版本的Linux进行内核驱动差异比较），根据这些差异信息为驱动移植工作提供辅助。GumTree的语法树差异分析工具已经比较成熟，其缺陷在于构建抽象语法树的过程，不能很好地处理 Linux内核的复杂语法，以及不能识别宏展开后导致的差异。为此，我们使用最适宜处理 Linux内核的GCC 来完成抽象语法树的构建，将GCC插件介入该软件中，作为GumTree的输入前端（输出格式为.XML），之后使用 GumTree进行树差异分析，再对结果进行展示。本课题研究的主要工作分为以下三步： 1. 实现了一个 GCC 插件，能在不影响正常编译的情况下，导出 GCC内部的抽象语法树，供 GumTree 进一步处理。2. 修改 GumTree 的前后端，使用导出的抽象语法树作为输入，并在差异展示时能够显示宏的展开情况。3. 使用此工具对 Linux 内核中显卡驱动进行分析（以Linux-3.5.4和Linux-3.8.13为例）。以下章节是对该软件的部署以及解释文档：
+
+
+## 第一章 GumTree 的编译与使用 ##
+
+### 1、Java（JDK）的安装 ###
+
+1.1 在当前用户状态下建立一个目录并切换到该目录下：
+
+> $mkdir ~/PREBUILT
+> 
+> $cd ~/PREBUILT/
+
+1.2 将事先下载好的jdk-8u20-linux-x64.tar.gz 解压到当前目录下：
+
+> $tar xf ~/jdk-8u20-linux-x64.tar.gz
+ 
+1.3 配置环境变量：
+
+将以下内容加入 ~/.bashrc文件中。
+>    JAVA_HOME=~/PREBUILT/jdk1.8.0_20
+>    PATH=$JAVA_HOME/bin:$PATH
+>    export JAVA_HOME PATH   
+>    unset CLASSPATH
+
+注：.bashrc在/home目录下，若在/home目录下没有看见该文件，就按“Ctrl+h”，这样就会将隐藏文件显示出来。
+将上述环境变量填写完后，编译.bashrc文件。
+> $source ~/.bashrc
+
+1.4 查看是否安装成功
+
+> $java –version
+### 2、Maven的安装 ###
+2.1 切换目录，将事先下载好的 apache-maven-3.2.5-bin.tar.gz解压到当前目录下：
+> $cd ~/PREBUILT/
+> $tar xf ~/apache-maven-3.2.5-bin.tar.gz
+2.2 配置环境变量：
+    
+将以下内容加入 ~/.bashrc文件中。
+>     PATH=~/PREBUILT/apache-maven-3.2.5/bin:$PATH
+>     export PATH
+>     unset MAVEN_OPTS
+
+将上述环境变量填写完后，编译.bashrc文件。
+> $source ~/.bashrc
+2.3 查看是否安装成功：
+> $mvn –version
+ 
+### 3、GumTree的安装 ###
+3.1 解压缩rendersnake-m2.zip和gumtree-master.zip
+>  $ cd ~
+>  $ unzip ~/rendersnake-m2.zip  #rendersnake是简单的HTML Java输出
+>  $ unzip ~/demo_code/gumtree-master.zip
+3.2 $MAVEN_OPTS="-DsocksProxyHost=localhost -DsocksProxyPort=9050" mvn clean install #将jar包安装到maven本地仓库中
+执行 mvn clean install
+ 
+执行MAVEN_OPTS="-DsocksProxyHost=localhost -DsocksProxyPort=9050" mvn clean install
+ 
+### 4、GumTree的测试 ###
+4.1 
+> $java -jar ~/gumtree-master/client/target/gumtree.jar ~/sample/A.java ~/sample/B.java -o asrc #测试实例来测试是否生成抽象语法树（以A.java和B.java为例）
+ 
+4.2
+>  $java -jar ~/gumtree-master/client/target/gumtree.jar ~/sample/C.h ~/sample/D.h -o asrc#测试实例来测试是否生成抽象语法树（以C.h和D.h为例）
+ 
+4.3 
+> $ java -jar ~/gumtree-master/client/target/gumtree.jar ~/sample/A.java ~/sample/B.java
+ 
+### 5、OCaml 的安装以及 cgum 的安装（可选） ###
+5.1 OCaml的安装:
+
+> $sudo apt-get install ocaml-native-compilers
+
+5.2 cgum的编译安装
+> $cd ~
+> 
+> $git clone https://github.com/GumTreeDiff/cgum
+> 
+> $cd ~/cgum/
+> 
+> $make
+> 
+> $~/cgum/cgum ~/sample/C.h
+> 
+> $mkdir ~/bin
+> 
+> $ln -s ~/cgum/cgum ~/bin/
+> 
+> $export PATH=~/bin:$PATH # GumTree 默认的 C 前端是 cgum，它需要用 OCaml 编译
+5.3用例测试
+$java -jar ~/gumtree-master/client/target/gumtree.jar ~/sample/C.h ~/sample/D.h -o asrc
+ 
+## 第二章	GCC 插件的编译安装 ##
+### 1、	GCC 编译安装 ###
+> $mkdir ~/SOURCE
+> 
+> $cd ~/SOURCE/
+> 
+> $tar xf ~/gcc-4.8.4.tar.bz2 
+> 
+> $cd ~/SOURCE/gcc-4.8.4/
+> 
+> $./contrib/download_prerequisites #下载编译时所需要的依赖包
+> 
+> $mkdir ~/SOURCE/build-gcc-4.8.4
+> 
+> $cd ~/SOURCE/build-gcc-4.8.4/
+> 
+> $$PWD/../gcc-4.8.4/configure --prefix=$HOME/INSTALL --enable-languages=c,c++#配置路径以及配置该插件支持C和C++语言
+>  
+> $make -j$(nproc)# 以当前进程可用的处理器数为线程并行执行
+> 
+> $make install #安装需要的各种配置文件
+ 
+注：如果想要将这个 gcc 设为默认，将以下内容加入 ~/.bashrc
+        
+>  export PATH=~/INSTALL/bin:$PATH
+
+   若未设为默认，则需要使用 `~/INSTALL/bin/gcc` 而不是 `gcc`（g++同理）
+## 2、	GCC 插件功能支持 ##
+查看是否支持GCC插件：
+
+> $ gcc -print-file-name=plugin#查看插件支持情况
+ 
+如果输出为 `plugin` 则不支持插件，否则应输出路径如 `~/INSTALL/lib/gcc/i686-pc-linux-gnu/4.8.4/plugin`
+
+以下称上述路径为 $GCC_PLUGIN，也可以向 ~/.bashrc 加入：
+ 
+>  export GCC_PLUGIN=`gcc -print-file-name=plugin`
+
+### 3、	GCC 插件的编译安装 ### 
+暂时不知道为什么编译时要依赖 GMP 头文件而安装好的 GCC 不提供，但如果自己编译了 GCC，在以下目录可以找到：
+
+ `~/SOURCE/build-gcc-4.8.4/gmp`
+
+建议在 ~/.bashrc 加入下一行简化插件编译和安装：
+ 
+> alias gccplg='g++ -shared -I$GCC_PLUGIN/include -fPIC -O2 -I$HOME/SOURCE/build-gcc-4.8.4/gmp -o $GCC_PLUGIN/gccdiff.so'
+ 
+此后一条命令完成编译安装：
+  
+>  $gccplg main.cxx #对自己编写的GCC插件进行编译安装
+
+## 第三章 使用 GCC 插件编译内核 ##
+### 1、GCC 的选择 ###
+   如果前面已经设为默认，什么都不需要做
+   否则在 `make menuconfig` 时，要填写 cross compile prefix 为 `$HOME/INSTALL/bin/`
+   此外对其他 binutils 建立软链接：
+  
+>  $ln -s /usr/bin/{ar,ld,nm,objcopy} ~/INSTALL/bin/
+### 2、内核编译 ###
+   为了方便调试，我一般进行如下编译：
+>    make O=/tmp/build-l8-allno V=1 allnoconfig
+>    
+>    make O=/tmp/build-l8-allno V=1 menuconfig  # 可能需要填写 cross compile prefix
+>    
+>    make O=/tmp/build-l8-allno V=1 EXTRA_CFLAGS="-fplugin=gccdiff" /tmp/dummy 2>&1
+>    
+   当然也可以将前两步得到的配置保存，或使用其他配置，关键是第三步的 EXTRA_CFLAGS 参数
+
+具体命令行如下：
+> $cd ~
+> 
+> $wget 'http://mirrors.tuna.tsinghua.edu.cn/kernel/v3.x/linux-3.5.4.tar.bz2'#下载Linux-3.5.4
+> 
+> $wget 'http://mirrors.tuna.tsinghua.edu.cn/kernel/v3.x/linux-3.8.13.tar.bz2'#下载Linux-3.8.13
+> 
+> $cd ~/SOURCE/
+> 
+> $tar xf ~/linux-3.5.4.tar.bz2
+> 
+> $tar xf ~/linux-3.8.13.tar.bz2
+> 
+> $cd /tmp/
+> 
+> $sudo chmod 777 .#修改权限为可读可写可执行
+> 
+> $tar xf ~/linux-3.5.4.tar.bz2
+> 
+> $tar xf ~/linux-3.8.13.tar.bz2
+> 
+> $mkdir /tmp/build-l5-allno
+> 
+> $mkdir /tmp/build-l8-allno
+> 
+> $cd /tmp/linux-3.5.4/
+> 
+> $make O=/tmp/build-l5-allno V=1 allnoconfig #编译所有的配置文件
+> 
+> $make O=/tmp/build-l5-allno V=1 menuconfig #开关控制
+>  
+> $diff -rq . ~/SOURCE/linux-3.5.4/
+> 
+> $cp /tmp/build-l5-allno/ ~/ -r
+> 
+> $cd /tmp/linux-3.8.13/
+> 
+> $make O=/tmp/build-l8-allno V=1 allnoconfig
+>  
+> $make O=/tmp/build-l8-allno V=1 menuconfig
+ 
+注：  在这里值得说明的是，在配置menuconfig时，如果前面的gcc设为默认，则这里的cross compile prefix不用考虑，否则将cross compile prefix填写为为 `$HOME/INSTALL/bin/`。
+
+> $diff -rq . ~/SOURCE/linux-3.8.13/
+> 
+> $cp /tmp/build-l8-allno/ ~/ -r
+> 
+> $time make O=/tmp/build-l5-allno V=1 EXTRA_CFLAGS="-fplugin=gccdiff" /tmp/dummy5 2>&1#配置EXTRA_CFLAGS等参数
+>  
+> $less /tmp/dummy5
+> 
+> $ time make O=/tmp/build-l8-allno V=1 EXTRA_CFLAGS="-fplugin=gccdiff" /tmp/dummy 2>&1
+>  
+> $less /tmp/dummy
+## 第四章 可视化展示 ##
+### 1、信息收集（collection） ###
+在这一模块中，因为要用到GCC插件，所以在第三章中的内容必须按部就班，并且要成功地执行。在信息收集这一模块，我们首先要进行信息收集：在源码文件夹下，找到所有 .ind 导出文件，并解析出每个文件包含哪些函数，存为清单文件。
+
+> $cd ~/demo_code/
+
+> $vim process.py   # 这里值得注意的是要修改两个地方，一是搜索查找gumtree.jar，然后将其路径修改为当前用户gumtree.jar所在的位置；而是选择调用主函数中的collect()函数。 
+
+> $time python process.py #执行完这句话，会在/tmp下生成V0和V1这两个文件 !
+ 
+> $ll /tmp/V*   #（V*为VMwareDnD）                                       
+ 
+### 2、生成HTML文件（可视化展示） ###
+> $ cd ~/demo_code/
+> 
+> $vim process.py  # 选择主函数中task_vgacon（）函数，将其他函数屏蔽掉。
+> 
+> $mkdir /tmp/diff_area
+> 
+> $python process.py
+> 
+> $cat /tmp/diff_area/*.html
+ 
+# 总结 	 #
+第一模块 GCC前端输入：第二章GCC插件的编译和第三章使用GCC插件编译安装，生成．ｘｍｌ文件供GumTree使用。
+
+第二模块　将第一模块中生成．ｘｍｌ文件作为GumTree的输入前端，在该模块生成抽象语法树。
+
+第三模块 将不同的Linux-3.5.4和Linux-3.13.8这两个版本的驱动内核利用上面的软件进行差异分析，最终在可视化界面上展示。
