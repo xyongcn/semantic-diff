@@ -2,7 +2,7 @@ import sys
 from subprocess import check_output
 import xml.etree.ElementTree as ET
 import difflib
-
+import os
 
 EXT0 = '.ind'
 EXT1 = '.gcc'
@@ -10,11 +10,9 @@ EXT1 = '.gcc'
 
 def collect(prefix, out):
     ext = EXT0
-    u=1
     path_list = check_output(['find', prefix, '-name', '*'+ext, '-print0']).rstrip('\0').split('\0')
     count = 0
     for path in path_list:
-	print path+'\n'
         assert path.startswith(prefix) and path.endswith(ext)
         path_code = path[:-len(ext)]
         filename = path[len(prefix):-len(ext)]
@@ -31,8 +29,7 @@ def collect(prefix, out):
                 #if loc.split(':')[0] != path_code:
                 #    continue
                 print >> out, '{} {} {}'.format(filename, funcname, i)
- #               print filename
-                count+= 1
+                count += 1
     return count
 
 
@@ -66,7 +63,6 @@ TREE_NULL = 'NULL_xx'
 FUNCFILE = None
 file_cache = {}
 def flc2pos(loc_file, loc_line, loc_column):
-    #print loc_file
     if loc_file != FUNCFILE:
         return 0
     if not loc_file.startswith(PREFIX_CODE):
@@ -77,10 +73,8 @@ def flc2pos(loc_file, loc_line, loc_column):
         for i in range(1, len(acc)):
             acc[i] += acc[i-1]
         file_cache[loc_file] = acc
-    #print acc[0:loc_line-1]
     loc_line = int(loc_line)
     loc_column = int(loc_column)
-    #print loc_file+":"+str(loc_column-1)
     return file_cache[loc_file][loc_line-1] + loc_column-1
 
 
@@ -90,8 +84,6 @@ def gen_gcc(filename, funcname, prefix_code, offset, prefix_build, outname):
     global PREFIX_CODE, PREFIX_BUILD
     PREFIX_CODE = prefix_code
     PREFIX_BUILD = prefix_build
-    #print filename
-    #print funcname
     with open('{}{}{}'.format(prefix_code, filename, EXT0)) as f:
         for i, l in enumerate(f):
             assert l[-1] == '\n'
@@ -111,7 +103,6 @@ def gen_gcc(filename, funcname, prefix_code, offset, prefix_build, outname):
                 assert loc_file == endLoc_file
                 global FUNCFILE
                 FUNCFILE = loc_file
-#`		print loc_file+"dsafdsf"
                 ret = (loc_file, loc_line, '1', endLoc_file, endLoc_line, endLoc_column)
                 ind_stack = [0]
                 ele_stack = [ET.Element('tree', {
@@ -322,10 +313,10 @@ def merge_mark(gum_dict, diff, loc0, loc1, o):
 def gen_html(filename, funcname, o):
     offset0 = lookup(filename, funcname, V0_MANIFEST)
     offset1 = lookup(filename, funcname, V1_MANIFEST)
-    if offset0 == -1 and offset1 == -1:
-	print 'no have this function!'
-	return
-    assert offset0 != -1 and offset1 != -1,'no have this function!'
+    if offset0 == -1 or offset1 ==-1:
+	print 'Your config is wrong!'
+	return 
+    assert offset0 != -1 and offset1 != -1
     loc0 = gen_gcc(filename, funcname, V0_CODE, offset0, V0_BUILD, TMP_V0_GCC+EXT1)
     loc1 = gen_gcc(filename, funcname, V1_CODE, offset1, V1_BUILD, TMP_V1_GCC+EXT1)
     gum = check_output(['java', '-jar', '/home/bit-xcliang/gumtree-master/client/target/gumtree.jar', '-o', 'tag', TMP_V0_GCC, TMP_V1_GCC])
@@ -335,8 +326,9 @@ def gen_html(filename, funcname, o):
     gum_dict = parse_gum(gum)
     code0 = extract_code(filename, loc0, V0_CODE)
     code1 = extract_code(filename, loc1, V1_CODE)
+    print code0,code1
     diff = list(difflib._mdiff(code0, code1))
-   # print gum_dict
+    # print gum_dict
     ret_diff = merge_mark(gum_dict, diff, loc0, loc1, o)
     return ret_gum, ret_diff
 
@@ -421,15 +413,15 @@ function toggle() {
 
 
 #'''
-V0_CODE = '/tmp/linux-3.5.4/'
+V0_CODE = None
+V1_CODE = None
 V0_BUILD = '/tmp/build-l5-allno/'
-V0_MANIFEST = '/tmp/V0'
-V1_CODE = '/tmp/linux-3.8.13/'
+V0_MANIFEST = '/tmp/V0' 
 V1_BUILD = '/tmp/build-l8-allno/'
 V1_MANIFEST = '/tmp/V1'
 TMP_V0_GCC = '/tmp/tmp0.c'
 TMP_V1_GCC = '/tmp/tmp1.c'
-OUTPUT_DIR = '/tmp/diff_area/'
+
 '''
 V0_CODE = '/tmp/sample/old/'
 V0_BUILD = '/tmp/sample/'
@@ -452,75 +444,49 @@ def task_collect():
     #'''
 
 
-def task_diff_all():
-    '''
-    common0, common1 = set(), set()
-    with open(V0_MANIFEST) as f:
-        for l in f:
-            filename, funcname, offset = l.split()
-            common0.add((filename, funcname))
-    with open(V1_MANIFEST) as f:
-        for l in f:
-            filename, funcname, offset = l.split()
-            common1.add((filename, funcname))
-    common = common0 & common1
-    print len(common)
-    # common = map(lambda x: common.pop(), range(10))
-    diff_ret = []
-    import os, os.path
-    for i, (filename, funcname) in enumerate(common):
-        print i, filename, funcname
-        if not os.path.isdir(OUTPUT_DIR+filename):
-            os.makedirs(OUTPUT_DIR+filename)
-        with open(OUTPUT_DIR+filename+'/'+funcname+'.html', 'w') as o:
-            ret_gum, ret_diff = gen_html(filename, funcname, o)
-        diff_ret.append((filename, funcname, ret_gum, ret_diff))
-    with open('/tmp/FINAL', 'w') as o:
-        print >> o, diff_ret
-    '''
-
-
-def task_macro():
-    #with open('/tmp/diff_area/macro.html', 'w') as o:
-    #    gen_html('kernel/futex.c', 'futex_atomic_op_inuser', o)
-    #with open('/tmp/diff_area/macro2.html', 'w') as o:
-    #    gen_html('fs/filesystems.c', 'fs_index', o)
-    #gen_html('arch/x86/kernel/cpu/perf_event_intel_lbr.c', 'branch_type')
-    # gen_html('part.c', 'main')
-    pass
-
 
 def task_vgacon():
- #   func, file_ = 'vgacon_adjust_height', 'drivers/video/console/vgacon.c'
-  #  func, file_ = 'write_vga', 'drivers/video/console/vgacon.c'
-   # func, file_ = 'vgacon_set_cursor_size', 'drivers/video/console/vgacon.c'
-    #func, file_ = 'vga_vesa_blank', 'drivers/video/console/vgacon.c'
-   # func, file_ = 'vgacon_doresize', 'drivers/video/console/vgacon.c'
-   # func, file_ = 'vga_vesa_unblank', 'drivers/video/console/vgacon.c'
-    #func, file_ = 'vgacon_do_font_op', 'drivers/video/console/vgacon.c'
-    file_=raw_input("please input file name:")
-    func=raw_input("please input function name:")
-#	with open(file_) as p:
- #          if not p.strip()
-  #             return 0
-    with open('/tmp/diff_area/'+func+'.html', 'w') as o:
-            gen_html(file_, func, o)
-
-
-def task_video_more():
-    #func, file_ = 'iounmap', 'arch/x86/mm/ioremap.c'
-    func, file_ = '__release_region', 'kernel/resource.c'
-    #func, file_ = '__request_region', 'kernel/resource.c'
-    with open('/tmp/diff_area/'+func+'.html', 'w') as o:
-        k=gen_html(file_, func, o)
-	if k==0:
-	   print "no have this founction!"
-
+    P0=sys.argv[1]
+    P1=sys.argv[2]
+    if P0[6] > P1[6]:
+        print 'The latter should be newer than former!'
+        return
+    elif P0[6] == P1[6]:
+	if P0[8] > P1[8]:
+	    print 'The latter should be newer than former!'
+	    return
+	elif P0[8] == P1[8]:
+	     if P0[10] > P1[10]:
+		 print 'The latter should be newer than former!'
+		 return
+	     elif P0[10] == P1[10]:
+		 print 'the same version!'
+		 return  	
+    global V0_CODE,V1_CODE
+    V0_CODE = '/tmp/'+P0+'/'
+    V1_CODE = '/tmp/'+P1+'/'
+    file_=sys.argv[3]
+    func=sys.argv[4]
+    config=sys.argv[5]
+    global V0_BULID,V1_BUILD
+    if config == 'x86_64' or config == 'i386':
+	V0_BUILD = '/tmp/build-l5-allno/'
+	V1_BUILD = '/tmp/build-l8-allno/'
+    elif config == 'sparc32' or config == 'sparc64':
+	V0_BUILD = '/tmp/build-lp5-allno/'
+        V1_BUILD = '/tmp/build-lp8-allno/'
+    else:
+	V0_BUILD = '/tmp/build-lo5-allno/'
+        V1_BUILD = '/tmp/build-lo8-allno/'	
+    if os.path.exists('/tmp/diff_area'+'/'+P0+'/'+P1+'/'+file_) == False:
+        os.makedirs('/tmp/diff_area'+'/'+P0+'/'+P1+'/'+file_)
+    with open('/tmp/diff_area'+'/'+P0+'/'+P1+'/'+file_+'/'+func+'.html', 'w') as o:
+        gen_html(file_, func, o)
+ 
 
 def main():
-   #  task_collect()
+    # task_collect()
      task_vgacon()
-    #task_video_more()
 
 
 if __name__ == '__main__':
